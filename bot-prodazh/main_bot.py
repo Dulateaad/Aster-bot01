@@ -64,6 +64,9 @@ class SupportState(StatesGroup):
 class PaymentState(StatesGroup):
     waiting_for_receipt = State()
 
+class PhotoUploadState(StatesGroup):
+    waiting_for_photo = State()
+
 # Middleware to update last_active timestamp
 class LastActiveMiddleware(BaseMiddleware):
     async def on_pre_process_message(self, message: types.Message, data: dict):
@@ -1305,6 +1308,76 @@ async def notify_manager_with_contact_discount(user_id, data):
 async def notify_managers_new_ad(ad):
     # Дополнительная функция, если требуется
     pass
+
+# Handlers for admin media uploads
+@dp.message_handler(commands=['add_ad_photo', 'add_ad_inspection', 'add_ad_thickness'])
+async def start_ad_media_upload(message: types.Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        await message.answer("У вас нет прав для выполнения этой команды.")
+        return
+
+    command = message.text.split()[0].lower()
+    media_type_map = {
+        '/add_ad_photo': 'photo',
+        '/add_ad_inspection': 'inspection',
+        '/add_ad_thickness': 'thickness',
+    }
+    media_type = media_type_map.get(command)
+
+    args = message.get_args().strip()
+    if not args or not args.isdigit():
+        await message.answer("Пожалуйста, укажите ID объявления. Пример: /add_ad_photo 1")
+        return
+
+    ad_id = int(args)
+
+    try:
+        ad = await db.get_ad(ad_id)
+    except Exception as e:
+        logger.error(f"Ошибка при получении объявления {ad_id}: {e}")
+        ad = None
+
+    if not ad:
+        await message.answer(f"Объявление с ID {ad_id} не найдено.")
+        return
+
+    await state.update_data(ad_id=ad_id, media_type=media_type)
+    await PhotoUploadState.waiting_for_photo.set()
+    await message.answer("Отправьте фото, которое нужно прикрепить к объявлению. Можно отменить командой 'Отмена'.")
+
+
+@dp.message_handler(content_types=['photo'], state=PhotoUploadState.waiting_for_photo)
+async def receive_ad_media(message: types.Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        await message.answer("У вас нет прав для добавления фото.")
+        await state.finish()
+        return
+
+    data = await state.get_data()
+    ad_id = data.get('ad_id')
+    media_type = data.get('media_type')
+
+    if ad_id is None or media_type is None:
+        await message.answer("Не удалось определить объявление. Попробуйте снова.")
+        await state.finish()
+        return
+
+    file_id = message.photo[-1].file_id
+
+    try:
+        await db.append_ad_media(ad_id, file_id, media_type)
+    except ValueError as exc:
+        await message.answer(str(exc))
+        await state.finish()
+        return
+
+    await message.answer("Фото успешно добавлено к объявлению.")
+    await state.finish()
+
+
+@dp.message_handler(state=PhotoUploadState.waiting_for_photo)
+async def receive_non_photo_media(message: types.Message, state: FSMContext):
+    await message.answer("Пожалуйста, отправьте фото или отмените командой 'Отмена'.")
 
 # Run the bot
 if __name__ == '__main__':
