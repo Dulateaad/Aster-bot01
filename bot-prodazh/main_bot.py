@@ -1,3 +1,4 @@
+# main_bot.py
 
 import logging
 import os
@@ -49,6 +50,8 @@ class AdStates(StatesGroup):
     photos = State()
     inspection_photos = State()
     thickness_photos = State()
+    edit_field = State()
+    edit_value = State()
 
 class SubscriptionStates(StatesGroup):
     model = State()
@@ -66,6 +69,15 @@ class PaymentState(StatesGroup):
 
 class PhotoUploadState(StatesGroup):
     waiting_for_photo = State()
+
+class PriceAdjustState(StatesGroup):
+    waiting_for_photo = State()
+
+class OfferPriceState(StatesGroup):
+    waiting_for_price = State()
+
+class PriceRaiseState(StatesGroup):
+    waiting_for_price = State()
 
 # Middleware to update last_active timestamp
 class LastActiveMiddleware(BaseMiddleware):
@@ -1051,7 +1063,81 @@ async def process_ad_management(callback_query: types.CallbackQuery, state: FSMC
             logger.error(f"Ошибка при удалении объявления {ad_id}: {e}")
             await callback_query.answer("Произошла ошибка при удалении объявления.", show_alert=True)
     elif action == 'edit':
-        await callback_query.answer("Редактирование пока не реализовано.", show_alert=True)
+        await state.update_data(edit_ad_id=ad_id)
+        await callback_query.answer()
+        await bot.send_message(
+            callback_query.from_user.id,
+            "Что хотите изменить? Укажите поле и новое значение в формате:\n"
+            "title=Новый заголовок\nmodel=Модель\nyear=2022\nprice=15000000\ndescription=Текст",
+        )
+        await AdStates.edit_field.set()
+
+# Admin edit ad handlers
+@dp.message_handler(state=AdStates.edit_field)
+async def edit_ad_field(message: types.Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        await message.answer("У вас нет прав.")
+        await state.finish()
+        return
+
+    text = message.text.strip()
+    parts = text.split('=', 1)
+    if len(parts) != 2:
+        await message.answer("Некорректный формат. Пример: price=15000000")
+        return
+
+    field, value = parts[0].strip().lower(), parts[1].strip()
+    if field not in {'title', 'model', 'year', 'price', 'description'}:
+        await message.answer("Можно редактировать только: title, model, year, price, description")
+        return
+
+    await state.update_data(field=field, value=value)
+    await message.answer("Сохранить изменение? (да/нет)")
+    await AdStates.edit_value.set()
+
+
+@dp.message_handler(lambda msg: msg.text.lower() in {'да', 'нет'}, state=AdStates.edit_value)
+async def confirm_edit(message: types.Message, state: FSMContext):
+    if message.text.lower() == 'нет':
+        await message.answer("Редактирование отменено.")
+        await state.finish()
+        return
+
+    data = await state.get_data()
+    ad_id = data.get('edit_ad_id')
+    field = data.get('field')
+    value = data.get('value')
+
+    if not ad_id or not field:
+        await message.answer("Не удалось определить объявление. Попробуйте снова.")
+        await state.finish()
+        return
+
+    update_payload = {}
+    if field in {'year', 'price'}:
+        try:
+            update_payload[field] = int(value)
+        except ValueError:
+            await message.answer("Введите числовое значение для выбранного поля.")
+            await state.finish()
+            return
+    else:
+        update_payload[field] = value
+
+    try:
+        await db.update_ad(ad_id, **update_payload)
+    except ValueError as exc:
+        await message.answer(str(exc))
+        await state.finish()
+        return
+
+    await message.answer("Объявление обновлено.")
+    await state.finish()
+
+
+@dp.message_handler(state=AdStates.edit_value)
+async def invalid_confirmation(message: types.Message, state: FSMContext):
+    await message.answer("Ответьте 'да' для сохранения или 'нет' для отмены.")
 
 # Handlers for admin commands
 @dp.message_handler(lambda message: message.text in ["Статистика", "Рассылка", "Экспорт контактов", "Открыть/Закрыть Бот"])
@@ -1210,7 +1296,7 @@ async def toggle_bot_state(message: types.Message):
         await message.answer("Произошла ошибка при изменении состояния бота. Пожалуйста, попробуйте позже.")
 
 # Handlers for buying and discount requests
-@dp.callback_query_handler(lambda c: c.data and c.data.startswith(('description_', 'inspection_', 'thickness_', 'buy_', 'discount_')))
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith(('description_', 'inspection_', 'thickness_', 'buy_', 'discount_', 'offer_', 'raise_')))
 async def process_callback_ad(callback_query: types.CallbackQuery, state: FSMContext):
     ad_id = int(callback_query.data.split('_')[1])
     action = callback_query.data.split('_')[0]
@@ -1289,6 +1375,19 @@ async def process_callback_ad(callback_query: types.CallbackQuery, state: FSMCon
         min_price = int(ad['price'] * 0.8)
         await DiscountState.desired_price.set()
         await bot.send_message(callback_query.from_user.id, f"Введите желаемую цену или 'Отмена' для отмены:")
+    elif action == 'offer':
+        await callback_query.answer()
+        await state.update_data(offer_ad_id=ad_id)
+        await OfferPriceState.waiting_for_price.set()
+        await bot.send_message(callback_query.from_user.id, "Введите цену, которую хотите предложить, или 'Отмена' для отмены:")
+    elif action == 'raise':
+        if callback_query.from_user.id not in ADMIN_IDS:
+            await callback_query.answer("Недостаточно прав", show_alert=True)
+            return
+        await callback_query.answer()
+        await state.update_data(raise_ad_id=ad_id)
+        await PriceRaiseState.waiting_for_price.set()
+        await bot.send_message(callback_query.from_user.id, f"Текущая цена: {ad['price']} KZT. Введите новую цену:")
     else:
         await callback_query.answer()
 
@@ -1436,6 +1535,179 @@ async def receive_ad_media(message: types.Message, state: FSMContext):
 @dp.message_handler(state=PhotoUploadState.waiting_for_photo)
 async def receive_non_photo_media(message: types.Message, state: FSMContext):
     await message.answer("Пожалуйста, отправьте фото или отмените командой 'Отмена'.")
+
+@dp.message_handler(state=PriceAdjustState.waiting_for_photo)
+async def receive_ad_media(message: types.Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        await message.answer("У вас нет прав для добавления фото.")
+        await state.finish()
+        return
+
+    data = await state.get_data()
+    ad_id = data.get('ad_id')
+    media_type = data.get('media_type')
+
+    if ad_id is None or media_type is None:
+        await message.answer("Не удалось определить объявление. Попробуйте снова.")
+        await state.finish()
+        return
+
+    file_id = message.photo[-1].file_id
+
+    try:
+        await db.append_ad_media(ad_id, file_id, media_type)
+    except ValueError as exc:
+        await message.answer(str(exc))
+        await state.finish()
+        return
+
+    await message.answer("Фото успешно добавлено к объявлению.")
+    await state.finish()
+
+@dp.message_handler(state=OfferPriceState.waiting_for_price)
+async def handle_offer_price(message: types.Message, state: FSMContext):
+    if message.text.lower() == 'отмена':
+        await message.answer("Действие отменено.", reply_markup=main_menu_keyboard())
+        await state.finish()
+        return
+
+    try:
+        offered_price = int(message.text.strip())
+    except ValueError:
+        await message.answer("Введите числовое значение цены или 'Отмена'.")
+        return
+
+    if offered_price <= 0:
+        await message.answer("Цена должна быть положительной. Попробуйте снова.")
+        return
+
+    data = await state.get_data()
+    ad_id = data.get('offer_ad_id')
+    if not ad_id:
+        await message.answer("Не удалось определить объявление. Попробуйте снова из карточки объявления.")
+        await state.finish()
+        return
+
+    try:
+        ad = await db.get_ad(ad_id)
+    except Exception as e:
+        logger.error(f"Ошибка при получении объявления {ad_id}: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
+        await state.finish()
+        return
+
+    if not ad:
+        await message.answer("Объявление не найдено.")
+        await state.finish()
+        return
+
+    await notify_managers_price_offer(message.from_user.id, ad, offered_price)
+    await message.answer("Ваше предложение отправлено менеджеру. Спасибо!", reply_markup=main_menu_keyboard())
+    await state.finish()
+
+@dp.message_handler(state=PriceRaiseState.waiting_for_price)
+async def handle_raise_price(message: types.Message, state: FSMContext):
+    if message.text.lower() == 'отмена':
+        await message.answer("Действие отменено.")
+        await state.finish()
+        return
+
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("У вас нет прав на изменение цены.")
+        await state.finish()
+        return
+
+    try:
+        new_price = int(message.text.strip())
+    except ValueError:
+        await message.answer("Введите числовое значение цены или 'Отмена'.")
+        return
+
+    if new_price <= 0:
+        await message.answer("Цена должна быть положительной. Попробуйте снова.")
+        return
+
+    data = await state.get_data()
+    ad_id = data.get('raise_ad_id')
+    if not ad_id:
+        await message.answer("Не удалось определить объявление. Попробуйте снова.")
+        await state.finish()
+        return
+
+    try:
+        ad = await db.get_ad(ad_id)
+    except Exception as e:
+        logger.error(f"Ошибка при получении объявления {ad_id}: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
+        await state.finish()
+        return
+
+    if not ad:
+        await message.answer("Объявление не найдено.")
+        await state.finish()
+        return
+
+    old_price = ad['price']
+    try:
+        await db.update_ad(ad_id, price=new_price)
+    except ValueError as exc:
+        await message.answer(str(exc))
+        await state.finish()
+        return
+
+    # Обновляем данные в состоянии пользователя, если они были сохранены
+    fsm_data = await state.get_data()
+    ads = fsm_data.get('ads')
+    if ads:
+        for entry in ads:
+            if entry['ad_id'] == ad_id:
+                entry['price'] = new_price
+        await state.update_data(ads=ads)
+
+    await message.answer(f"Цена обновлена: {old_price} → {new_price} KZT.")
+
+    # Отправляем уведомления менеджерам/админам
+    updated_ad = await db.get_ad(ad_id)
+    await notify_price_change(updated_ad, old_price, new_price, message.from_user.id)
+
+    await state.finish()
+
+async def notify_managers_price_offer(user_id: int, ad, offered_price: int):
+    user_contact = await db.get_user(user_id)
+    if user_contact:
+        name = user_contact.get('name') or "Не указано"
+        phone = user_contact.get('phone') or "Не указано"
+        city = user_contact.get('city') or "Не указано"
+    else:
+        name = phone = city = "Не указано"
+
+    text = (
+        f"Пользователь *@{user_contact.get('username') if user_contact else 'unknown'}* предложил цену\n"
+        f"Автомобиль: {ad['title']}\n"
+        f"Предложение: {offered_price} KZT\n"
+        f"Имя: {name}\nТелефон: {phone}\nГород: {city}"
+    )
+    recipients = set(MANAGER_IDS + ADMIN_IDS)
+    for recipient in recipients:
+        try:
+            await bot.send_message(recipient, text, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление о предложении цены пользователю {recipient}: {e}")
+
+async def notify_price_change(ad, old_price: int, new_price: int, initiator_id: int):
+    text = (
+        f"Цена обновлена для объявления '{ad['title']}'.\n"
+        f"Было: {old_price} KZT\n"
+        f"Стало: {new_price} KZT"
+    )
+    recipients = set(MANAGER_IDS + ADMIN_IDS)
+    for recipient in recipients:
+        if recipient == initiator_id:
+            continue
+        try:
+            await bot.send_message(recipient, text)
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление об изменении цены пользователю {recipient}: {e}")
 
 # Run the bot
 if __name__ == '__main__':
