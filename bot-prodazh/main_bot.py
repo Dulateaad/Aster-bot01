@@ -1,3 +1,5 @@
+ main_bot.py
+
 import logging
 import os
 import pandas as pd
@@ -75,6 +77,9 @@ class OfferPriceState(StatesGroup):
     waiting_for_price = State()
 
 class PriceRaiseState(StatesGroup):
+    waiting_for_price = State()
+
+class RaiseRequestState(StatesGroup):
     waiting_for_price = State()
 
 # Middleware to update last_active timestamp
@@ -223,16 +228,16 @@ async def send_welcome(message: types.Message):
             if user.get('name') and user.get('phone') and user.get('city'):
                 await message.answer("Ваш доступ уже подтвержден. Вы можете пользоваться ботом.", reply_markup=main_menu_keyboard())
             else:
-                await message.answer("Ваш доступ подтвержден. Пожалуйста, предоставьте вашу контактную информацию.")
+                await message.answer("Ваш доступ подтвержден. Пожалуйста, предоставьте вашу контактную информацию.", reply_markup=cancel_keyboard())
                 await ContactInfoState.name.set()
-                await message.answer("Пожалуйста, введите ваше имя:")
+                await message.answer("Пожалуйста, введите ваше имя:", reply_markup=cancel_keyboard())
         else:
             # Новый пользователь, бот открыт - регистрируем без оплаты
             try:
                 await db.add_user(user_id, message.from_user.username, status='approved')
-                await message.answer("Добро пожаловать! Пожалуйста, предоставьте вашу контактную информацию.")
+                await message.answer("Добро пожаловать! Пожалуйста, предоставьте вашу контактную информацию.", reply_markup=cancel_keyboard())
                 await ContactInfoState.name.set()
-                await message.answer("Пожалуйста, введите ваше имя:")
+                await message.answer("Пожалуйста, введите ваше имя:", reply_markup=cancel_keyboard())
             except Exception as e:
                 logger.error(f"Ошибка при добавлении пользователя {user_id}: {e}")
                 await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -245,16 +250,16 @@ async def send_welcome(message: types.Message):
             if user.get('name') and user.get('phone') and user.get('city'):
                 await message.answer("Ваш доступ уже подтвержден. Вы можете пользоваться ботом.", reply_markup=main_menu_keyboard())
             else:
-                await message.answer("Ваш доступ подтвержден. Пожалуйста, предоставьте вашу контактную информацию.")
+                await message.answer("Ваш доступ подтвержден. Пожалуйста, предоставьте вашу контактную информацию.", reply_markup=cancel_keyboard())
                 await ContactInfoState.name.set()
-                await message.answer("Пожалуйста, введите ваше имя:")
+                await message.answer("Пожалуйста, введите ваше имя:", reply_markup=cancel_keyboard())
         else:
             # В режиме памяти закрытый режим не используем — просто даём доступ
             try:
                 await db.add_user(user_id, message.from_user.username, status='approved')
-                await message.answer("Добро пожаловать! Пожалуйста, предоставьте вашу контактную информацию.")
+                await message.answer("Добро пожаловать! Пожалуйста, предоставьте вашу контактную информацию.", reply_markup=cancel_keyboard())
                 await ContactInfoState.name.set()
-                await message.answer("Пожалуйста, введите ваше имя:")
+                await message.answer("Пожалуйста, введите ваше имя:", reply_markup=cancel_keyboard())
             except Exception as e:
                 logger.error(f"Ошибка при добавлении пользователя {user_id}: {e}")
                 await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -268,7 +273,7 @@ def payment_keyboard():
 # Handler for "Я оплатил" message
 @dp.message_handler(lambda message: message.text == "Я оплатил")
 async def process_payment(message: types.Message, state: FSMContext):
-    await message.answer("Пожалуйста, отправьте чек одним сообщением (фото или файл).")
+    await message.answer("Пожалуйста, отправьте чек одним сообщением (фото или файл).", reply_markup=cancel_keyboard())
     await PaymentState.waiting_for_receipt.set()
 
 # Handler to receive cheque (restricted to PaymentState)
@@ -291,7 +296,7 @@ async def receive_cheque(message: types.Message, state: FSMContext):
         await message.answer("Произошла ошибка при сохранении чека. Пожалуйста, попробуйте позже.")
         return
 
-    await message.answer("Ваш чек отправлен на проверку. Ожидайте подтверждения.")
+    await message.answer("Ваш чек отправлен на проверку. Ожидайте подтверждения.", reply_markup=main_menu_keyboard())
 
     # Уведомляем администраторов
     for admin_id in ADMIN_IDS:
@@ -357,10 +362,10 @@ async def get_name(message: types.Message, state: FSMContext):
         await message.answer("Действие отменено.", reply_markup=main_menu_keyboard())
         return
     if not message.text.strip():
-        await message.answer("Имя не может быть пустым. Пожалуйста, введите ваше имя:")
+        await message.answer("Имя не может быть пустым. Пожалуйста, введите ваше имя:", reply_markup=cancel_keyboard())
         return
     await state.update_data(name=message.text.strip())
-    await message.answer("Пожалуйста, введите ваш номер телефона:")
+    await message.answer("Пожалуйста, введите ваш номер телефона:", reply_markup=cancel_keyboard())
     await ContactInfoState.phone.set()
 
 @dp.message_handler(state=ContactInfoState.phone, content_types=['text', 'contact'])
@@ -374,10 +379,10 @@ async def get_phone(message: types.Message, state: FSMContext):
     else:
         phone_number = message.text.strip()
         if not phone_number:
-            await message.answer("Номер телефона не может быть пустым. Пожалуйста, введите ваш номер телефона:")
+            await message.answer("Номер телефона не может быть пустым. Пожалуйста, введите ваш номер телефона:", reply_markup=cancel_keyboard())
             return
     await state.update_data(phone=phone_number)
-    await message.answer("Пожалуйста, введите ваш город:")
+    await message.answer("Пожалуйста, введите ваш город:", reply_markup=cancel_keyboard())
     await ContactInfoState.city.set()
 
 @dp.message_handler(state=ContactInfoState.city)
@@ -388,7 +393,7 @@ async def get_city(message: types.Message, state: FSMContext):
         return
     city = message.text.strip()
     if not city:
-        await message.answer("Город не может быть пустым. Пожалуйста, введите ваш город:")
+        await message.answer("Город не может быть пустым. Пожалуйста, введите ваш город:", reply_markup=cancel_keyboard())
         return
     await state.update_data(city=city)
     data = await state.get_data()
@@ -409,6 +414,11 @@ def main_menu_keyboard():
     keyboard.add("Поддержка")
     if ADMIN_IDS:
         keyboard.add("Админ Панель")
+    return keyboard
+
+def cancel_keyboard():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add("Отмена")
     return keyboard
 
 # Show main menu
@@ -756,7 +766,10 @@ async def delete_subscription(callback_query: types.CallbackQuery):
 # Handlers for support
 @dp.message_handler(lambda message: message.text == "Поддержка" or message.text == "/support")
 async def start_support(message: types.Message):
-    await message.answer("Вы можете задать свой вопрос, и менеджер скоро свяжется с вами. Напишите ваше сообщение или 'Отмена' для отмены:")
+    await message.answer(
+        "Вы можете задать свой вопрос, и менеджер скоро свяжется с вами. Напишите ваше сообщение или 'Отмена' для отмены:",
+        reply_markup=cancel_keyboard(),
+    )
     await SupportState.waiting_for_message.set()
 
 @dp.message_handler(state=SupportState.waiting_for_message)
@@ -780,7 +793,7 @@ async def forward_to_manager(message: types.Message, state: FSMContext):
             await bot.send_message(manager_id, f"Ответьте, используя кнопку ниже.", reply_markup=manager_reply_keyboard(message.from_user.id))
         except Exception as e:
             logger.error(f"Ошибка при отправке сообщения менеджеру {manager_id}: {e}")
-    await message.answer("Ваше сообщение отправлено менеджеру. Ожидайте ответа.")
+    await message.answer("Ваше сообщение отправлено менеджеру. Ожидайте ответа.", reply_markup=main_menu_keyboard())
     await state.finish()
 
 # Manager reply keyboard
@@ -835,25 +848,25 @@ async def add_ad_start(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("У вас нет доступа.")
         return
-    await message.answer("Введите название автомобиля:")
+    await message.answer("Введите название автомобиля:", reply_markup=cancel_keyboard())
     await AdStates.title.set()
 
 @dp.message_handler(state=AdStates.title)
 async def ad_title(message: types.Message, state: FSMContext):
     if not message.text.strip():
-        await message.answer("Название автомобиля не может быть пустым. Пожалуйста, введите название:")
+        await message.answer("Название автомобиля не может быть пустым. Пожалуйста, введите название:", reply_markup=cancel_keyboard())
         return
     await state.update_data(title=message.text.strip())
-    await message.answer("Введите модель автомобиля:")
+    await message.answer("Введите модель автомобиля:", reply_markup=cancel_keyboard())
     await AdStates.model.set()
 
 @dp.message_handler(state=AdStates.model)
 async def ad_model(message: types.Message, state: FSMContext):
     if not message.text.strip():
-        await message.answer("Модель автомобиля не может быть пустой. Пожалуйста, введите модель:")
+        await message.answer("Модель автомобиля не может быть пустой. Пожалуйста, введите модель:", reply_markup=cancel_keyboard())
         return
     await state.update_data(model=message.text.strip())
-    await message.answer("Введите год выпуска:")
+    await message.answer("Введите год выпуска:", reply_markup=cancel_keyboard())
     await AdStates.year.set()
 
 @dp.message_handler(state=AdStates.year)
@@ -862,34 +875,34 @@ async def ad_year(message: types.Message, state: FSMContext):
         year = int(message.text)
         current_year = datetime.utcnow().year
         if year < 1900 or year > current_year + 1:
-            await message.answer(f"Пожалуйста, введите год выпуска между 1900 и {current_year + 1}:")
+            await message.answer(f"Пожалуйста, введите год выпуска между 1900 и {current_year + 1}:", reply_markup=cancel_keyboard())
             return
         await state.update_data(year=year)
-        await message.answer("Введите цену:")
+        await message.answer("Введите цену:", reply_markup=cancel_keyboard())
         await AdStates.price.set()
     except ValueError:
-        await message.answer("Пожалуйста, введите числовое значение для года.")
+        await message.answer("Пожалуйста, введите числовое значение для года.", reply_markup=cancel_keyboard())
 
 @dp.message_handler(state=AdStates.price)
 async def ad_price(message: types.Message, state: FSMContext):
     try:
         price = int(message.text)
         if price <= 0:
-            await message.answer("Цена должна быть положительным числом. Пожалуйста, введите цену:")
+            await message.answer("Цена должна быть положительным числом. Пожалуйста, введите цену:", reply_markup=cancel_keyboard())
             return
         await state.update_data(price=price)
-        await message.answer("Введите полное описание:")
+        await message.answer("Введите полное описание:", reply_markup=cancel_keyboard())
         await AdStates.description.set()
     except ValueError:
-        await message.answer("Пожалуйста, введите числовое значение для цены.")
+        await message.answer("Пожалуйста, введите числовое значение для цены.", reply_markup=cancel_keyboard())
 
 @dp.message_handler(state=AdStates.description)
 async def ad_description(message: types.Message, state: FSMContext):
     if not message.text.strip():
-        await message.answer("Описание не может быть пустым. Пожалуйста, введите описание:")
+        await message.answer("Описание не может быть пустым. Пожалуйста, введите описание:", reply_markup=cancel_keyboard())
         return
     await state.update_data(description=message.text.strip())
-    await message.answer("Загрузите фото автомобиля (по одному). Когда закончите, отправьте команду /done")
+    await message.answer("Загрузите фото автомобиля (по одному). Когда закончите, отправьте команду /done", reply_markup=cancel_keyboard())
     await AdStates.photos.set()
     # Инициализируем список для хранения фото
     await state.update_data(photos=[])
@@ -903,16 +916,16 @@ async def ad_photos(message: types.Message, state: FSMContext):
     file_id = message.photo[-1].file_id
     photos.append(file_id)
     await state.update_data(photos=photos)
-    await message.answer("Фото добавлено. Загрузите следующее или отправьте /done, если закончите.")
+    await message.answer("Фото добавлено. Загрузите следующее или отправьте /done, если закончите.", reply_markup=cancel_keyboard())
 
 @dp.message_handler(lambda message: message.text == '/done', state=AdStates.photos)
 async def ad_photos_done(message: types.Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get('photos', [])
     if not photos:
-        await message.answer("Пожалуйста, загрузите хотя бы одно фото автомобиля или отмените действие командой 'Отмена'.")
+        await message.answer("Пожалуйста, загрузите хотя бы одно фото автомобиля или отмените действие командой 'Отмена'.", reply_markup=cancel_keyboard())
         return
-    await message.answer("Загрузите акт осмотра (фото). Когда закончите, отправьте команду /done")
+    await message.answer("Загрузите акт осмотра (фото). Когда закончите, отправьте команду /done", reply_markup=cancel_keyboard())
     await AdStates.inspection_photos.set()
     # Инициализируем список для фото акта осмотра
     await state.update_data(inspection_photos=[])
@@ -925,16 +938,16 @@ async def ad_inspection_photos(message: types.Message, state: FSMContext):
     file_id = message.photo[-1].file_id
     inspection_photos.append(file_id)
     await state.update_data(inspection_photos=inspection_photos)
-    await message.answer("Фото добавлено. Загрузите следующее или отправьте /done, если закончите.")
+    await message.answer("Фото добавлено. Загрузите следующее или отправьте /done, если закончите.", reply_markup=cancel_keyboard())
 
 @dp.message_handler(lambda message: message.text == '/done', state=AdStates.inspection_photos)
 async def ad_inspection_photos_done(message: types.Message, state: FSMContext):
     data = await state.get_data()
     inspection_photos = data.get('inspection_photos', [])
     if not inspection_photos:
-        await message.answer("Пожалуйста, загрузите хотя бы одно фото акта осмотра или отмените действие командой 'Отмена'.")
+        await message.answer("Пожалуйста, загрузите хотя бы одно фото акта осмотра или отмените действие командой 'Отмена'.", reply_markup=cancel_keyboard())
         return
-    await message.answer("Загрузите фото толщиномера (по одному). Когда закончите, отправьте команду /done")
+    await message.answer("Загрузите фото толщиномера (по одному). Когда закончите, отправьте команду /done", reply_markup=cancel_keyboard())
     await AdStates.thickness_photos.set()
     # Инициализируем список для фото толщиномера
     await state.update_data(thickness_photos=[])
@@ -947,14 +960,14 @@ async def ad_thickness_photos(message: types.Message, state: FSMContext):
     file_id = message.photo[-1].file_id
     thickness_photos.append(file_id)
     await state.update_data(thickness_photos=thickness_photos)
-    await message.answer("Фото добавлено. Загрузите следующее или отправьте /done, если закончите.")
+    await message.answer("Фото добавлено. Загрузите следующее или отправьте /done, если закончите.", reply_markup=cancel_keyboard())
 
 @dp.message_handler(lambda message: message.text == '/done', state=AdStates.thickness_photos)
 async def ad_thickness_photos_done(message: types.Message, state: FSMContext):
     data = await state.get_data()
     thickness_photos = data.get('thickness_photos', [])
     if not thickness_photos:
-        await message.answer("Пожалуйста, загрузите хотя бы одно фото толщиномера или отмените действие командой 'Отмена'.")
+        await message.answer("Пожалуйста, загрузите хотя бы одно фото толщиномера или отмените действие командой 'Отмена'.", reply_markup=cancel_keyboard())
         return
     try:
         ad_id = await db.add_ad(
@@ -969,11 +982,11 @@ async def ad_thickness_photos_done(message: types.Message, state: FSMContext):
         )
     except Exception as e:
         logger.error(f"Ошибка при добавлении объявления: {e}")
-        await message.answer("Произошла ошибка при сохранении объявления. Пожалуйста, попробуйте позже.")
+        await message.answer("Произошла ошибка при сохранении объявления. Пожалуйста, попробуйте позже.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
-    await message.answer("Объявление сохранено.")
+    await message.answer("Объявление сохранено.", reply_markup=main_menu_keyboard())
     # Уведомляем подписчиков
     try:
         ad = await db.get_ad(ad_id)
@@ -1024,10 +1037,10 @@ async def manage_ads(message: types.Message):
         ads = await db.get_ads()
     except Exception as e:
         logger.error(f"Ошибка при получении объявлений для управления: {e}")
-        await message.answer("Произошла ошибка при получении объявлений. Пожалуйста, попробуйте позже.")
+        await message.answer("Произошла ошибка при получении объявлений. Пожалуйста, попробуйте позже.", reply_markup=cancel_keyboard())
         return
     if not ads:
-        await message.answer("Нет доступных объявлений.")
+        await message.answer("Нет доступных объявлений.", reply_markup=cancel_keyboard())
         return
     for ad in ads:
         ad_id = ad['ad_id']
@@ -1100,13 +1113,14 @@ async def edit_ad_value(message: types.Message, state: FSMContext):
     if message.text.lower() == 'отмена':
         await message.answer("Редактирование отменено.")
         await state.finish()
+        await admin_panel(message)
         return
 
     data = await state.get_data()
     ad_id = data.get('edit_ad_id')
     field = data.get('field')
     if not ad_id or not field:
-        await message.answer("Не удалось определить объявление. Попробуйте снова.")
+        await message.answer("Не удалось определить объявление. Попробуйте снова.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1115,10 +1129,10 @@ async def edit_ad_value(message: types.Message, state: FSMContext):
         try:
             value_parsed = int(value)
         except ValueError:
-            await message.answer("Введите числовое значение или 'Отмена'.")
+            await message.answer("Введите числовое значение или 'Отмена'.", reply_markup=cancel_keyboard())
             return
         if value_parsed <= 0:
-            await message.answer("Значение должно быть положительным. Попробуйте снова.")
+            await message.answer("Значение должно быть положительным. Попробуйте снова.", reply_markup=cancel_keyboard())
             return
         payload = {field: value_parsed}
     else:
@@ -1131,8 +1145,9 @@ async def edit_ad_value(message: types.Message, state: FSMContext):
         await state.finish()
         return
 
-    await message.answer("Объявление обновлено.")
+    await message.answer("Объявление обновлено.", reply_markup=main_menu_keyboard())
     await state.finish()
+    await admin_panel(message)
 
 # Handlers for admin commands
 @dp.message_handler(lambda message: message.text in ["Статистика", "Рассылка", "Экспорт контактов", "Открыть/Закрыть Бот"])
@@ -1148,9 +1163,9 @@ async def process_admin_commands(message: types.Message):
             await message.answer(f"Всего пользователей: {users_count}\nАктивных пользователей: {active_users}\nКоличество объявлений: {ads_count}")
         except Exception as e:
             logger.error(f"Ошибка при получении статистики: {e}")
-            await message.answer("Произошла ошибка при получении статистики. Пожалуйста, попробуйте позже.")
+            await message.answer("Произошла ошибка при получении статистики. Пожалуйста, попробуйте позже.", reply_markup=cancel_keyboard())
     elif message.text == "Рассылка":
-        await message.answer("Пожалуйста, введите сообщение для рассылки:")
+        await message.answer("Пожалуйста, введите сообщение для рассылки:", reply_markup=cancel_keyboard())
         await MailingStates.message.set()
     elif message.text == "Экспорт контактов":
         await export_contacts(message)
@@ -1167,11 +1182,11 @@ async def process_mailing(message: types.Message, state: FSMContext):
         users = await db.get_approved_users()
     except Exception as e:
         logger.error(f"Ошибка при получении списка одобренных пользователей для рассылки: {e}")
-        await message.answer("Произошла ошибка при получении списка пользователей. Пожалуйста, попробуйте позже.")
+        await message.answer("Произошла ошибка при получении списка пользователей. Пожалуйста, попробуйте позже.", reply_markup=cancel_keyboard())
         return
 
     if not users:
-        await message.answer("Нет одобренных пользователей для рассылки.")
+        await message.answer("Нет одобренных пользователей для рассылки.", reply_markup=cancel_keyboard())
         return
 
     total_users = len(users)
@@ -1184,27 +1199,27 @@ async def process_mailing(message: types.Message, state: FSMContext):
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения пользователю {user_id}: {e}")
 
-    await message.answer(f"Рассылка завершена.\nУспешно отправлено: {success_count}/{total_users}")
+    await message.answer(f"Рассылка завершена.\nУспешно отправлено: {success_count}/{total_users}", reply_markup=main_menu_keyboard())
 
 # Admin broadcast to long-registered users
 @dp.message_handler(commands=['broadcast_old'])
 async def start_broadcast_old(message: types.Message, state: FSMContext):
     if not _is_admin(message.from_user.id):
-        await message.answer("У вас нет прав для выполнения этой команды.")
+        await message.answer("У вас нет прав для выполнения этой команды.", reply_markup=cancel_keyboard())
         return
 
     args = message.get_args().strip()
     if not args or not args.isdigit():
-        await message.answer("Укажите количество дней, например: /broadcast_old 30")
+        await message.answer("Укажите количество дней, например: /broadcast_old 30", reply_markup=cancel_keyboard())
         return
 
     days = int(args)
     if days <= 0:
-        await message.answer("Количество дней должно быть положительным числом.")
+        await message.answer("Количество дней должно быть положительным числом.", reply_markup=cancel_keyboard())
         return
 
     await state.update_data(broadcast_days=days)
-    await message.answer(f"Выбраны пользователи, зарегистрированные более {days} дней назад. Отправьте текст сообщения:")
+    await message.answer(f"Выбраны пользователи, зарегистрированные более {days} дней назад. Отправьте текст сообщения:", reply_markup=cancel_keyboard())
     await MailingStates.old_message.set()
 
 
@@ -1213,7 +1228,7 @@ async def process_broadcast_old(message: types.Message, state: FSMContext):
     data = await state.get_data()
     days = data.get('broadcast_days')
     if not days:
-        await message.answer("Не удалось определить параметры рассылки. Попробуйте снова.")
+        await message.answer("Не удалось определить параметры рассылки. Попробуйте снова.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1222,14 +1237,14 @@ async def process_broadcast_old(message: types.Message, state: FSMContext):
         candidates = await db.get_users_registered_before(cutoff)
     except Exception as e:
         logger.error(f"Ошибка при получении списка пользователей для рассылки по давности регистрации: {e}")
-        await message.answer("Не удалось получить список пользователей. Попробуйте позже.")
+        await message.answer("Не удалось получить список пользователей. Попробуйте позже.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
     recipients = [user['user_id'] for user in candidates if user.get('status') == 'approved']
 
     if not recipients:
-        await message.answer("Подходящих пользователей не найдено.")
+        await message.answer("Подходящих пользователей не найдено.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1241,7 +1256,7 @@ async def process_broadcast_old(message: types.Message, state: FSMContext):
         except Exception as e:
             logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
 
-    await message.answer(f"Рассылка завершена. Успешно отправлено: {sent}/{len(recipients)}")
+    await message.answer(f"Рассылка завершена. Успешно отправлено: {sent}/{len(recipients)}", reply_markup=main_menu_keyboard())
     await state.finish()
 
 # Function to export contacts to Excel
@@ -1250,10 +1265,10 @@ async def export_contacts(message: types.Message):
         users = await db.get_user_contacts()
     except Exception as e:
         logger.error(f"Ошибка при получении контактов пользователей: {e}")
-        await message.answer("Произошла ошибка при получении контактов. Пожалуйста, попробуйте позже.")
+        await message.answer("Произошла ошибка при получении контактов. Пожалуйста, попробуйте позже.", reply_markup=cancel_keyboard())
         return
     if not users:
-        await message.answer("Нет зарегистрированных пользователей.")
+        await message.answer("Нет зарегистрированных пользователей.", reply_markup=cancel_keyboard())
         return
     # Создаем DataFrame
     df = pd.DataFrame(users, columns=['Имя', 'Город', 'Телефон'])
@@ -1263,7 +1278,7 @@ async def export_contacts(message: types.Message):
         df.to_excel(file_path, index=False)
     except Exception as e:
         logger.error(f"Ошибка при сохранении контактов в Excel: {e}")
-        await message.answer("Произошла ошибка при сохранении контактов. Пожалуйста, попробуйте позже.")
+        await message.answer("Произошла ошибка при сохранении контактов. Пожалуйста, попробуйте позже.", reply_markup=cancel_keyboard())
         return
     # Отправляем файл администратору
     try:
@@ -1271,7 +1286,7 @@ async def export_contacts(message: types.Message):
         logger.info(f"Файл контактов отправлен администратору {message.from_user.id}.")
     except Exception as e:
         logger.error(f"Ошибка при отправке файла контактов: {e}")
-        await message.answer("Произошла ошибка при отправке файла. Пожалуйста, попробуйте позже.")
+        await message.answer("Произошла ошибка при отправке файла. Пожалуйста, попробуйте позже.", reply_markup=cancel_keyboard())
     finally:
         # Удаляем файл после отправки
         if os.path.exists(file_path):
@@ -1284,11 +1299,11 @@ async def toggle_bot_state(message: types.Message):
         new_state = not current_state
         await db.set_bot_state(new_state)
         state_text = "открыт" if new_state else "закрыт"
-        await message.answer(f"Бот теперь {state_text} для новых пользователей.")
+        await message.answer(f"Бот теперь {state_text} для новых пользователей.", reply_markup=main_menu_keyboard())
         logger.info(f"Состояние бота изменено на {state_text}.")
     except Exception as e:
         logger.error(f"Ошибка при переключении состояния бота: {e}")
-        await message.answer("Произошла ошибка при изменении состояния бота. Пожалуйста, попробуйте позже.")
+        await message.answer("Произошла ошибка при изменении состояния бота. Пожалуйста, попробуйте позже.", reply_markup=cancel_keyboard())
 
 # Handlers for buying and discount requests
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith(('description_', 'inspection_', 'thickness_', 'buy_', 'discount_', 'offer_', 'raise_')))
@@ -1303,7 +1318,7 @@ async def process_callback_ad(callback_query: types.CallbackQuery, state: FSMCon
         return
 
     if not ad:
-        await callback_query.answer("Объявление не найдено.")
+        await callback_query.answer("Объявление не найдено.", show_alert=True)
         return
     title = ad['title']
     price = ad['price']
@@ -1362,27 +1377,29 @@ async def process_callback_ad(callback_query: types.CallbackQuery, state: FSMCon
         await callback_query.answer()
         data = {'ad_id': ad_id}
         await notify_manager_with_contact(callback_query.from_user.id, data)
-        await bot.send_message(callback_query.from_user.id, "Ваш запрос отправлен менеджеру. Ожидайте обратной связи.")
+        await bot.send_message(callback_query.from_user.id, "Ваш запрос отправлен менеджеру. Ожидайте обратной связи.", reply_markup=main_menu_keyboard())
     elif action == 'discount':
         await callback_query.answer()
         ad_id = ad_id
         await state.update_data(ad_id=ad_id)
         min_price = int(ad['price'] * 0.8)
         await DiscountState.desired_price.set()
-        await bot.send_message(callback_query.from_user.id, f"Введите желаемую цену или 'Отмена' для отмены:")
+        await bot.send_message(callback_query.from_user.id, f"Введите желаемую цену или 'Отмена' для отмены:", reply_markup=cancel_keyboard())
     elif action == 'offer':
         await callback_query.answer()
         await state.update_data(offer_ad_id=ad_id)
         await OfferPriceState.waiting_for_price.set()
-        await bot.send_message(callback_query.from_user.id, "Введите цену, которую хотите предложить, или 'Отмена' для отмены:")
+        await bot.send_message(callback_query.from_user.id, "Введите цену, которую хотите предложить, или 'Отмена' для отмены:", reply_markup=cancel_keyboard())
     elif action == 'raise':
-        if callback_query.from_user.id not in ADMIN_IDS:
-            await callback_query.answer("Недостаточно прав", show_alert=True)
-            return
         await callback_query.answer()
-        await state.update_data(raise_ad_id=ad_id)
-        await PriceRaiseState.waiting_for_price.set()
-        await bot.send_message(callback_query.from_user.id, f"Текущая цена: {ad['price']} KZT. Введите новую цену:")
+        if callback_query.from_user.id in ADMIN_IDS:
+            await state.update_data(raise_ad_id=ad_id)
+            await PriceRaiseState.waiting_for_price.set()
+            await bot.send_message(callback_query.from_user.id, f"Текущая цена: {ad['price']} KZT. Введите новую цену:", reply_markup=cancel_keyboard())
+        else:
+            await state.update_data(raise_request_ad_id=ad_id)
+            await RaiseRequestState.waiting_for_price.set()
+            await bot.send_message(callback_query.from_user.id, "На сколько хотите поднять цену? Введите новую цену или 'Отмена':", reply_markup=cancel_keyboard())
     else:
         await callback_query.answer()
 
@@ -1421,16 +1438,16 @@ async def process_desired_price(message: types.Message, state: FSMContext):
         ad = await db.get_ad(ad_id)
         min_price = int(ad['price'] * 0.8)
         if desired_price < min_price:
-            await message.answer(f"Цена не может быть ниже {min_price} KZT. Пожалуйста, введите корректную цену:")
+            await message.answer(f"Цена не может быть ниже {min_price} KZT. Пожалуйста, введите корректную цену:", reply_markup=cancel_keyboard())
             return
         await state.update_data(desired_price=desired_price)
         # Уведомляем менеджеров
         data = await state.get_data()
         await notify_manager_with_contact_discount(message.from_user.id, data)
-        await message.answer("Ваш запрос на скидку отправлен менеджеру. Ожидайте обратной связи.")
+        await message.answer("Ваш запрос на скидку отправлен менеджеру. Ожидайте обратной связи.", reply_markup=main_menu_keyboard())
         await state.finish()
     except ValueError:
-        await message.answer("Пожалуйста, введите числовое значение для цены.")
+        await message.answer("Пожалуйста, введите числовое значение для цены.", reply_markup=cancel_keyboard())
         return
 
 # Function to notify managers about discount requests
@@ -1478,7 +1495,7 @@ async def start_ad_media_upload(message: types.Message, state: FSMContext):
 
     args = message.get_args().strip()
     if not args or not args.isdigit():
-        await message.answer("Пожалуйста, укажите ID объявления. Пример: /add_ad_photo 1")
+        await message.answer("Пожалуйста, укажите ID объявления. Пример: /add_ad_photo 1", reply_markup=cancel_keyboard())
         return
 
     ad_id = int(args)
@@ -1490,18 +1507,18 @@ async def start_ad_media_upload(message: types.Message, state: FSMContext):
         ad = None
 
     if not ad:
-        await message.answer(f"Объявление с ID {ad_id} не найдено.")
+        await message.answer(f"Объявление с ID {ad_id} не найдено.", reply_markup=cancel_keyboard())
         return
 
     await state.update_data(ad_id=ad_id, media_type=media_type)
     await PhotoUploadState.waiting_for_photo.set()
-    await message.answer("Отправьте фото, которое нужно прикрепить к объявлению. Можно отменить командой 'Отмена'.")
+    await message.answer("Отправьте фото, которое нужно прикрепить к объявлению. Можно отменить командой 'Отмена'.", reply_markup=cancel_keyboard())
 
 
 @dp.message_handler(content_types=['photo'], state=PhotoUploadState.waiting_for_photo)
 async def receive_ad_media(message: types.Message, state: FSMContext):
     if not _is_admin(message.from_user.id):
-        await message.answer("У вас нет прав для добавления фото.")
+        await message.answer("У вас нет прав для добавления фото.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1510,7 +1527,7 @@ async def receive_ad_media(message: types.Message, state: FSMContext):
     media_type = data.get('media_type')
 
     if ad_id is None or media_type is None:
-        await message.answer("Не удалось определить объявление. Попробуйте снова.")
+        await message.answer("Не удалось определить объявление. Попробуйте снова.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1523,18 +1540,18 @@ async def receive_ad_media(message: types.Message, state: FSMContext):
         await state.finish()
         return
 
-    await message.answer("Фото успешно добавлено к объявлению.")
+    await message.answer("Фото успешно добавлено к объявлению.", reply_markup=main_menu_keyboard())
     await state.finish()
 
 
 @dp.message_handler(state=PhotoUploadState.waiting_for_photo)
 async def receive_non_photo_media(message: types.Message, state: FSMContext):
-    await message.answer("Пожалуйста, отправьте фото или отмените командой 'Отмена'.")
+    await message.answer("Пожалуйста, отправьте фото или отмените командой 'Отмена'.", reply_markup=cancel_keyboard())
 
 @dp.message_handler(state=PriceAdjustState.waiting_for_photo)
 async def receive_ad_media(message: types.Message, state: FSMContext):
     if not _is_admin(message.from_user.id):
-        await message.answer("У вас нет прав для добавления фото.")
+        await message.answer("У вас нет прав для добавления фото.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1543,7 +1560,7 @@ async def receive_ad_media(message: types.Message, state: FSMContext):
     media_type = data.get('media_type')
 
     if ad_id is None or media_type is None:
-        await message.answer("Не удалось определить объявление. Попробуйте снова.")
+        await message.answer("Не удалось определить объявление. Попробуйте снова.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1556,7 +1573,7 @@ async def receive_ad_media(message: types.Message, state: FSMContext):
         await state.finish()
         return
 
-    await message.answer("Фото успешно добавлено к объявлению.")
+    await message.answer("Фото успешно добавлено к объявлению.", reply_markup=main_menu_keyboard())
     await state.finish()
 
 @dp.message_handler(state=OfferPriceState.waiting_for_price)
@@ -1569,17 +1586,17 @@ async def handle_offer_price(message: types.Message, state: FSMContext):
     try:
         offered_price = int(message.text.strip())
     except ValueError:
-        await message.answer("Введите числовое значение цены или 'Отмена'.")
+        await message.answer("Введите числовое значение цены или 'Отмена'.", reply_markup=cancel_keyboard())
         return
 
     if offered_price <= 0:
-        await message.answer("Цена должна быть положительной. Попробуйте снова.")
+        await message.answer("Цена должна быть положительной. Попробуйте снова.", reply_markup=cancel_keyboard())
         return
 
     data = await state.get_data()
     ad_id = data.get('offer_ad_id')
     if not ad_id:
-        await message.answer("Не удалось определить объявление. Попробуйте снова из карточки объявления.")
+        await message.answer("Не удалось определить объявление. Попробуйте снова из карточки объявления.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1587,12 +1604,12 @@ async def handle_offer_price(message: types.Message, state: FSMContext):
         ad = await db.get_ad(ad_id)
     except Exception as e:
         logger.error(f"Ошибка при получении объявления {ad_id}: {e}")
-        await message.answer("Произошла ошибка. Попробуйте позже.")
+        await message.answer("Произошла ошибка. Попробуйте позже.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
     if not ad:
-        await message.answer("Объявление не найдено.")
+        await message.answer("Объявление не найдено.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1603,29 +1620,29 @@ async def handle_offer_price(message: types.Message, state: FSMContext):
 @dp.message_handler(state=PriceRaiseState.waiting_for_price)
 async def handle_raise_price(message: types.Message, state: FSMContext):
     if message.text.lower() == 'отмена':
-        await message.answer("Действие отменено.")
+        await message.answer("Действие отменено.", reply_markup=main_menu_keyboard())
         await state.finish()
         return
 
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("У вас нет прав на изменение цены.")
+        await message.answer("У вас нет прав на изменение цены.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
     try:
         new_price = int(message.text.strip())
     except ValueError:
-        await message.answer("Введите числовое значение цены или 'Отмена'.")
+        await message.answer("Введите числовое значение цены или 'Отмена'.", reply_markup=cancel_keyboard())
         return
 
     if new_price <= 0:
-        await message.answer("Цена должна быть положительной. Попробуйте снова.")
+        await message.answer("Цена должна быть положительной. Попробуйте снова.", reply_markup=cancel_keyboard())
         return
 
     data = await state.get_data()
     ad_id = data.get('raise_ad_id')
     if not ad_id:
-        await message.answer("Не удалось определить объявление. Попробуйте снова.")
+        await message.answer("Не удалось определить объявление. Попробуйте снова.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1633,12 +1650,12 @@ async def handle_raise_price(message: types.Message, state: FSMContext):
         ad = await db.get_ad(ad_id)
     except Exception as e:
         logger.error(f"Ошибка при получении объявления {ad_id}: {e}")
-        await message.answer("Произошла ошибка. Попробуйте позже.")
+        await message.answer("Произошла ошибка. Попробуйте позже.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
     if not ad:
-        await message.answer("Объявление не найдено.")
+        await message.answer("Объявление не найдено.", reply_markup=cancel_keyboard())
         await state.finish()
         return
 
@@ -1659,7 +1676,7 @@ async def handle_raise_price(message: types.Message, state: FSMContext):
                 entry['price'] = new_price
         await state.update_data(ads=ads)
 
-    await message.answer(f"Цена обновлена: {old_price} → {new_price} KZT.")
+    await message.answer(f"Цена обновлена: {old_price} → {new_price} KZT.", reply_markup=main_menu_keyboard())
 
     # Отправляем уведомления менеджерам/админам
     updated_ad = await db.get_ad(ad_id)
@@ -1710,6 +1727,54 @@ async def close_admin_panel(message: types.Message):
         await message.answer("У вас нет доступа.")
         return
     await message.answer("Админ панель закрыта.", reply_markup=main_menu_keyboard())
+
+@dp.message_handler(state=RaiseRequestState.waiting_for_price)
+async def handle_raise_request(message: types.Message, state: FSMContext):
+    if message.text.lower() == 'отмена':
+        await message.answer("Действие отменено.", reply_markup=main_menu_keyboard())
+        await state.finish()
+        return
+
+    try:
+        requested_price = int(message.text.strip())
+    except ValueError:
+        await message.answer("Введите числовое значение цены или 'Отмена'.", reply_markup=cancel_keyboard())
+        return
+
+    if requested_price <= 0:
+        await message.answer("Цена должна быть положительной. Попробуйте снова.", reply_markup=cancel_keyboard())
+        return
+
+    data = await state.get_data()
+    ad_id = data.get('raise_request_ad_id')
+    if not ad_id:
+        await message.answer("Не удалось определить объявление. Попробуйте снова.", reply_markup=main_menu_keyboard())
+        await state.finish()
+        return
+
+    try:
+        ad = await db.get_ad(ad_id)
+    except Exception as e:
+        logger.error(f"Ошибка при получении объявления {ad_id}: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.", reply_markup=main_menu_keyboard())
+        await state.finish()
+        return
+
+    if not ad:
+        await message.answer("Объявление не найдено.", reply_markup=main_menu_keyboard())
+        await state.finish()
+        return
+
+    if requested_price <= ad['price']:
+        await message.answer(
+            f"Новая цена должна быть выше текущей ({ad['price']} KZT). Попробуйте снова или нажмите 'Отмена'.",
+            reply_markup=cancel_keyboard(),
+        )
+        return
+
+    await notify_managers_price_raise_request(message.from_user.id, ad, requested_price)
+    await message.answer("Ваше предложение отправлено менеджеру. Спасибо!", reply_markup=main_menu_keyboard())
+    await state.finish()
 
 # Run the bot
 if __name__ == '__main__':
