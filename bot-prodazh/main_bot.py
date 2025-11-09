@@ -498,12 +498,15 @@ async def show_ad_with_navigation(message_or_callback, state: FSMContext, edit=F
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton("Купить", callback_data=f"buy_{ad_id}"),
-        types.InlineKeyboardButton("Запросить скидку", callback_data=f"discount_{ad_id}"),
+        types.InlineKeyboardButton("Поднять цену", callback_data=f"raise_{ad_id}"),
     )
     keyboard.add(
         types.InlineKeyboardButton("Полное описание", callback_data=f"description_{ad_id}"),
         types.InlineKeyboardButton("Акт осмотра", callback_data=f"inspection_{ad_id}"),
         types.InlineKeyboardButton("Толщиномер", callback_data=f"thickness_{ad_id}")
+    )
+    keyboard.add(
+        types.InlineKeyboardButton("Предложить цену", callback_data=f"offer_{ad_id}")
     )
 
     # Check if ad is in favorites
