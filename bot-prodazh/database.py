@@ -27,17 +27,24 @@ class Database:
         logger.info("Завершение работы встроенного хранилища.")
 
     async def add_user(self, user_id, username=None, status='pending'):
-        user = self.users.get(user_id, {})
-        user.update({
-            'user_id': user_id,
-            'username': username,
-            'status': status,
-            'name': user.get('name'),
-            'phone': user.get('phone'),
-            'city': user.get('city'),
-            'cheque_file_id': user.get('cheque_file_id'),
-            'last_active': user.get('last_active') or datetime.utcnow(),
-        })
+        user = self.users.get(user_id)
+        if not user:
+            user = {
+                'user_id': user_id,
+                'username': username,
+                'status': status,
+                'name': None,
+                'phone': None,
+                'city': None,
+                'cheque_file_id': None,
+                'last_active': datetime.utcnow(),
+            }
+        else:
+            user.update({
+                'username': username,
+                'status': status,
+                'last_active': user.get('last_active') or datetime.utcnow(),
+            })
         self.users[user_id] = user
         logger.info("Пользователь %s добавлен/обновлен со статусом %s", user_id, status)
 
@@ -46,17 +53,44 @@ class Database:
         return dict(user) if user else None
 
     async def update_user_contact(self, user_id, name, phone, city):
-        user = self.users.setdefault(user_id, {'user_id': user_id})
+        user = self.users.setdefault(user_id, {
+            'user_id': user_id,
+            'username': None,
+            'status': 'pending',
+            'name': None,
+            'phone': None,
+            'city': None,
+            'cheque_file_id': None,
+            'last_active': datetime.utcnow(),
+        })
         user.update({'name': name, 'phone': phone, 'city': city})
         logger.info("Контактная информация пользователя %s обновлена", user_id)
 
     async def update_user_status(self, user_id, status):
-        user = self.users.setdefault(user_id, {'user_id': user_id})
+        user = self.users.setdefault(user_id, {
+            'user_id': user_id,
+            'username': None,
+            'status': status,
+            'name': None,
+            'phone': None,
+            'city': None,
+            'cheque_file_id': None,
+            'last_active': datetime.utcnow(),
+        })
         user['status'] = status
         logger.info("Статус пользователя %s обновлен на %s", user_id, status)
 
     async def update_last_active(self, user_id):
-        user = self.users.setdefault(user_id, {'user_id': user_id})
+        user = self.users.setdefault(user_id, {
+            'user_id': user_id,
+            'username': None,
+            'status': 'pending',
+            'name': None,
+            'phone': None,
+            'city': None,
+            'cheque_file_id': None,
+            'last_active': datetime.utcnow(),
+        })
         user['last_active'] = datetime.utcnow()
 
     async def is_bot_open(self):
