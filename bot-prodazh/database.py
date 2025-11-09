@@ -1,5 +1,3 @@
-# database.py
-
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -189,6 +187,25 @@ class Database:
 
         if sample_ads:
             logger.info("Добавлено %s тестовых объявления(ий) для демонстрации", len(sample_ads))
+
+    async def append_ad_media(self, ad_id: int, file_id: str, media_type: str):
+        ad = self.ads.get(ad_id)
+        if not ad:
+            raise ValueError(f"Объявление с ID {ad_id} не найдено")
+
+        key_map = {
+            'photo': 'photos',
+            'inspection': 'inspection_photos',
+            'thickness': 'thickness_photos',
+        }
+
+        key = key_map.get(media_type)
+        if not key:
+            raise ValueError(f"Неизвестный тип медиа: {media_type}")
+
+        media_list = ad.setdefault(key, [])
+        media_list.append(file_id)
+        logger.info("Добавлен файл %s в '%s' объявления %s", file_id, key, ad_id)
 
     async def get_ads(self):
         return [dict(ad) for ad in sorted(self.ads.values(), key=lambda x: x['added_date'], reverse=True)]
