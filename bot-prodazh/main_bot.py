@@ -1,4 +1,3 @@
-# main_bot.py
 
 import logging
 import os
@@ -39,6 +38,7 @@ class DiscountState(StatesGroup):
 
 class MailingStates(StatesGroup):
     message = State()
+    old_message = State()
 
 class AdStates(StatesGroup):
     title = State()
@@ -1104,6 +1104,64 @@ async def process_mailing(message: types.Message, state: FSMContext):
             logger.error(f"Ошибка отправки сообщения пользователю {user_id}: {e}")
 
     await message.answer(f"Рассылка завершена.\nУспешно отправлено: {success_count}/{total_users}")
+
+# Admin broadcast to long-registered users
+@dp.message_handler(commands=['broadcast_old'])
+async def start_broadcast_old(message: types.Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        await message.answer("У вас нет прав для выполнения этой команды.")
+        return
+
+    args = message.get_args().strip()
+    if not args or not args.isdigit():
+        await message.answer("Укажите количество дней, например: /broadcast_old 30")
+        return
+
+    days = int(args)
+    if days <= 0:
+        await message.answer("Количество дней должно быть положительным числом.")
+        return
+
+    await state.update_data(broadcast_days=days)
+    await message.answer(f"Выбраны пользователи, зарегистрированные более {days} дней назад. Отправьте текст сообщения:")
+    await MailingStates.old_message.set()
+
+
+@dp.message_handler(state=MailingStates.old_message)
+async def process_broadcast_old(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    days = data.get('broadcast_days')
+    if not days:
+        await message.answer("Не удалось определить параметры рассылки. Попробуйте снова.")
+        await state.finish()
+        return
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    try:
+        candidates = await db.get_users_registered_before(cutoff)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка пользователей для рассылки по давности регистрации: {e}")
+        await message.answer("Не удалось получить список пользователей. Попробуйте позже.")
+        await state.finish()
+        return
+
+    recipients = [user['user_id'] for user in candidates if user.get('status') == 'approved']
+
+    if not recipients:
+        await message.answer("Подходящих пользователей не найдено.")
+        await state.finish()
+        return
+
+    sent = 0
+    for user_id in recipients:
+        try:
+            await bot.send_message(user_id, message.text)
+            sent += 1
+        except Exception as e:
+            logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+
+    await message.answer(f"Рассылка завершена. Успешно отправлено: {sent}/{len(recipients)}")
+    await state.finish()
 
 # Function to export contacts to Excel
 async def export_contacts(message: types.Message):
