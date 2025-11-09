@@ -1064,41 +1064,41 @@ async def process_ad_management(callback_query: types.CallbackQuery, state: FSMC
             await callback_query.answer("Произошла ошибка при удалении объявления.", show_alert=True)
     elif action == 'edit':
         await state.update_data(edit_ad_id=ad_id)
-        await callback_query.answer()
-        await bot.send_message(
-            callback_query.from_user.id,
-            "Что хотите изменить? Укажите поле и новое значение в формате:\n"
-            "title=Новый заголовок\nmodel=Модель\nyear=2022\nprice=15000000\ndescription=Текст",
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(
+            types.InlineKeyboardButton("Название", callback_data="edit_field_title"),
+            types.InlineKeyboardButton("Модель", callback_data="edit_field_model"),
         )
-        await AdStates.edit_field.set()
+        keyboard.add(
+            types.InlineKeyboardButton("Год", callback_data="edit_field_year"),
+            types.InlineKeyboardButton("Цена", callback_data="edit_field_price"),
+        )
+        keyboard.add(types.InlineKeyboardButton("Описание", callback_data="edit_field_description"))
+        await callback_query.answer()
+        await bot.send_message(callback_query.from_user.id, "Что изменить?", reply_markup=keyboard)
 
-# Admin edit ad handlers
-@dp.message_handler(state=AdStates.edit_field)
-async def edit_ad_field(message: types.Message, state: FSMContext):
-    if not _is_admin(message.from_user.id):
-        await message.answer("У вас нет прав.")
-        await state.finish()
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('edit_field_'), state='*')
+async def choose_edit_field(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.from_user.id not in ADMIN_IDS:
+        await callback_query.answer("Нет прав", show_alert=True)
         return
 
-    text = message.text.strip()
-    parts = text.split('=', 1)
-    if len(parts) != 2:
-        await message.answer("Некорректный формат. Пример: price=15000000")
-        return
-
-    field, value = parts[0].strip().lower(), parts[1].strip()
-    if field not in {'title', 'model', 'year', 'price', 'description'}:
-        await message.answer("Можно редактировать только: title, model, year, price, description")
-        return
-
-    await state.update_data(field=field, value=value)
-    await message.answer("Сохранить изменение? (да/нет)")
+    _, _, field = callback_query.data.partition('edit_field_')
+    await state.update_data(field=field)
+    await callback_query.answer()
+    prompt_map = {
+        'title': 'Введите новое название:',
+        'model': 'Введите новую модель:',
+        'year': 'Введите новый год выпуска:',
+        'price': 'Введите новую цену:',
+        'description': 'Введите новое описание:',
+    }
+    await bot.send_message(callback_query.from_user.id, prompt_map.get(field, 'Введите новое значение:'))
     await AdStates.edit_value.set()
 
-
-@dp.message_handler(lambda msg: msg.text.lower() in {'да', 'нет'}, state=AdStates.edit_value)
-async def confirm_edit(message: types.Message, state: FSMContext):
-    if message.text.lower() == 'нет':
+@dp.message_handler(state=AdStates.edit_value)
+async def edit_ad_value(message: types.Message, state: FSMContext):
+    if message.text.lower() == 'отмена':
         await message.answer("Редактирование отменено.")
         await state.finish()
         return
@@ -1106,26 +1106,27 @@ async def confirm_edit(message: types.Message, state: FSMContext):
     data = await state.get_data()
     ad_id = data.get('edit_ad_id')
     field = data.get('field')
-    value = data.get('value')
-
     if not ad_id or not field:
         await message.answer("Не удалось определить объявление. Попробуйте снова.")
         await state.finish()
         return
 
-    update_payload = {}
-    if field in {'year', 'price'}:
+    value = message.text.strip()
+    if field in {'price', 'year'}:
         try:
-            update_payload[field] = int(value)
+            value_parsed = int(value)
         except ValueError:
-            await message.answer("Введите числовое значение для выбранного поля.")
-            await state.finish()
+            await message.answer("Введите числовое значение или 'Отмена'.")
             return
+        if value_parsed <= 0:
+            await message.answer("Значение должно быть положительным. Попробуйте снова.")
+            return
+        payload = {field: value_parsed}
     else:
-        update_payload[field] = value
+        payload = {field: value}
 
     try:
-        await db.update_ad(ad_id, **update_payload)
+        await db.update_ad(ad_id, **payload)
     except ValueError as exc:
         await message.answer(str(exc))
         await state.finish()
@@ -1133,11 +1134,6 @@ async def confirm_edit(message: types.Message, state: FSMContext):
 
     await message.answer("Объявление обновлено.")
     await state.finish()
-
-
-@dp.message_handler(state=AdStates.edit_value)
-async def invalid_confirmation(message: types.Message, state: FSMContext):
-    await message.answer("Ответьте 'да' для сохранения или 'нет' для отмены.")
 
 # Handlers for admin commands
 @dp.message_handler(lambda message: message.text in ["Статистика", "Рассылка", "Экспорт контактов", "Открыть/Закрыть Бот"])
