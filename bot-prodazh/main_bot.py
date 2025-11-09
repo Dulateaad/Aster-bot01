@@ -203,17 +203,16 @@ async def send_welcome(message: types.Message):
 
     if is_open:
         if user:
-            if user['status'] == 'approved':
-                # Проверка контактной информации
-                if user['name'] and user['phone'] and user['city']:
-                    await message.answer("Ваш доступ уже подтвержден. Вы можете пользоваться ботом.", reply_markup=main_menu_keyboard())
-                else:
-                    await message.answer("Ваш доступ подтвержден. Пожалуйста, предоставьте вашу контактную информацию.")
-                    await ContactInfoState.name.set()
-                    await message.answer("Пожалуйста, введите ваше имя:")
+            if user.get('status') != 'approved':
+                await db.update_user_status(user_id, 'approved')
+                user['status'] = 'approved'
+            # Проверка контактной информации
+            if user.get('name') and user.get('phone') and user.get('city'):
+                await message.answer("Ваш доступ уже подтвержден. Вы можете пользоваться ботом.", reply_markup=main_menu_keyboard())
             else:
-                # Пользователь существует, но не одобрен (должно быть неактуально в открытом режиме)
-                await message.answer("Ваш статус не позволяет использовать бота. Свяжитесь с администратором.")
+                await message.answer("Ваш доступ подтвержден. Пожалуйста, предоставьте вашу контактную информацию.")
+                await ContactInfoState.name.set()
+                await message.answer("Пожалуйста, введите ваше имя:")
         else:
             # Новый пользователь, бот открыт - регистрируем без оплаты
             try:
@@ -225,30 +224,27 @@ async def send_welcome(message: types.Message):
                 logger.error(f"Ошибка при добавлении пользователя {user_id}: {e}")
                 await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
     else:
-        if user and user['status'] == 'approved':
+        if user:
+            if user.get('status') != 'approved':
+                await db.update_user_status(user_id, 'approved')
+                user['status'] = 'approved'
             # Одобренный пользователь, доступ разрешен
-            if user['name'] and user['phone'] and user['city']:
+            if user.get('name') and user.get('phone') and user.get('city'):
                 await message.answer("Ваш доступ уже подтвержден. Вы можете пользоваться ботом.", reply_markup=main_menu_keyboard())
             else:
                 await message.answer("Ваш доступ подтвержден. Пожалуйста, предоставьте вашу контактную информацию.")
                 await ContactInfoState.name.set()
                 await message.answer("Пожалуйста, введите ваше имя:")
         else:
-            # Бот закрыт, пользователь не одобрен или новый
-            if user and user['status'] == 'pending':
-                await message.answer("Ваш запрос уже отправлен на одобрение. Ожидайте подтверждения администратора.")
-            else:
-                # Новый пользователь, бот закрыт - требуется оплата и отправка чека
-                try:
-                    await db.add_user(user_id, message.from_user.username, status='pending')
-                except Exception as e:
-                    logger.error(f"Ошибка при добавлении пользователя {user_id}: {e}")
-                    await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
-                    return
-                await message.answer(
-                    "Это закрытая платформа. Для доступа оплатите `10.000` Тенге на Kaspi Gold `+77028517037` (Гульбаршин.К).\nПосле оплаты нажмите 'Я оплатил' и отправьте чек.",
-                    reply_markup=payment_keyboard()
-                )
+            # В режиме памяти закрытый режим не используем — просто даём доступ
+            try:
+                await db.add_user(user_id, message.from_user.username, status='approved')
+                await message.answer("Добро пожаловать! Пожалуйста, предоставьте вашу контактную информацию.")
+                await ContactInfoState.name.set()
+                await message.answer("Пожалуйста, введите ваше имя:")
+            except Exception as e:
+                logger.error(f"Ошибка при добавлении пользователя {user_id}: {e}")
+                await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 # Payment keyboard
 def payment_keyboard():
