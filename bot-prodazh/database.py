@@ -214,6 +214,17 @@ class Database:
         media_list.append(file_id)
         logger.info("Добавлен файл %s в '%s' объявления %s", file_id, key, ad_id)
 
+    async def update_ad(self, ad_id: int, **fields):
+        ad = self.ads.get(ad_id)
+        if not ad:
+            raise ValueError(f"Объявление с ID {ad_id} не найдено")
+
+        allowed_fields = {'title', 'model', 'year', 'price', 'description'}
+        for key, value in fields.items():
+            if key in allowed_fields:
+                ad[key] = value
+        logger.info("Обновлено объявление %s: %s", ad_id, fields)
+
     async def get_ads(self):
         return [dict(ad) for ad in sorted(self.ads.values(), key=lambda x: x['added_date'], reverse=True)]
 
