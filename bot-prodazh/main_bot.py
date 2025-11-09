@@ -1,5 +1,3 @@
-# main_bot.py
-
 import logging
 import os
 import pandas as pd
@@ -829,6 +827,7 @@ async def admin_panel(message: types.Message):
     keyboard.add("Добавить объявление", "Управление объявлениями")
     keyboard.add("Статистика", "Рассылка")
     keyboard.add("Экспорт контактов", "Открыть/Закрыть Бот")
+    keyboard.add("Закрыть панель")
     await message.answer("Панель администратора", reply_markup=keyboard)
 
 @dp.message_handler(lambda message: message.text == "Добавить объявление")
@@ -1704,6 +1703,13 @@ async def notify_price_change(ad, old_price: int, new_price: int, initiator_id: 
             await bot.send_message(recipient, text)
         except Exception as e:
             logger.error(f"Не удалось отправить уведомление об изменении цены пользователю {recipient}: {e}")
+
+@dp.message_handler(lambda message: message.text == "Закрыть панель")
+async def close_admin_panel(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("У вас нет доступа.")
+        return
+    await message.answer("Админ панель закрыта.", reply_markup=main_menu_keyboard())
 
 # Run the bot
 if __name__ == '__main__':
