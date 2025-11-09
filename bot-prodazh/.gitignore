@@ -1,0 +1,15 @@
+   __pycache__/
+   *.pyc
+   *.pyo
+   *.log
+   *.sqlite3
+   *.db
+   .env
+   .env.*
+   *.zip
+   *.exe
+   *.mp4
+   *.jpg
+   *.png
+   *.webp
+   node_modules/
