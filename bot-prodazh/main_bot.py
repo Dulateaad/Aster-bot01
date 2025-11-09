@@ -1,4 +1,4 @@
- main_bot.py
+
 
 import logging
 import os
@@ -1782,3 +1782,4 @@ if __name__ == '__main__':
         executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
     except Exception as e:
         logger.critical(f"Бот завершился с ошибкой: {e}")
+
