@@ -19,6 +19,7 @@ class Database:
         self.bot_open = True
         self._next_ad_id = 1
         self._next_subscription_id = 1
+        self._seed_sample_ads()
 
     async def connect(self):
         logger.info("Инициализировано встроенное хранилище (без базы данных).")
@@ -118,6 +119,76 @@ class Database:
         self.ads[ad_id] = ad
         logger.info("Объявление '%s' добавлено с ID %s", title, ad_id)
         return ad_id
+
+    def _seed_sample_ads(self) -> None:
+        sample_ads = [
+            {
+                'title': 'Toyota Camry 2.5 AT',
+                'model': 'Camry',
+                'year': 2019,
+                'price': 17500000,
+                'description': (
+                    'Официальный дилерский автомобиль. Один владелец, полный комплект ключей, '
+                    'сервисная история. Комплектация Luxe: камера заднего вида, подогрев сидений, '
+                    'бесключевой доступ.'
+                ),
+                'photos': [
+                    'AQADnuQxG_9z0Ul-',
+                    'AQADoOQxG_9z0Ul-',
+                    'AQADOeQxG4co0Ul-',
+                ],
+                'inspection_photos': [],
+                'thickness_photos': [
+                    'AQADO-QxG4co0Ul9',
+                    'AQADOuQxG4co0Ul9',
+                ],
+            },
+            {
+                'title': 'Hyundai Tucson 1.6 Turbo',
+                'model': 'Tucson',
+                'year': 2020,
+                'price': 15800000,
+                'description': (
+                    'Полноприводный кроссовер. Турбированный двигатель, автоматическая коробка, '
+                    'кожаный салон, панорамная крыша. Пройдена комплексная диагностика.'
+                ),
+                'photos': [],
+                'inspection_photos': [],
+                'thickness_photos': [],
+            },
+            {
+                'title': 'Kia Rio X-Line',
+                'model': 'Rio',
+                'year': 2021,
+                'price': 9200000,
+                'description': (
+                    'Хэтчбек в отличном состоянии. Комплектация Comfort: мультимедиа с CarPlay/Android Auto, '
+                    'круиз-контроль, камера заднего вида. Проведена химчистка салона.'
+                ),
+                'photos': [],
+                'inspection_photos': [],
+                'thickness_photos': [],
+            },
+        ]
+
+        for ad in sample_ads:
+            ad_id = self._next_ad_id
+            self._next_ad_id += 1
+            self.ads[ad_id] = {
+                'ad_id': ad_id,
+                'title': ad['title'],
+                'model': ad['model'],
+                'year': ad['year'],
+                'price': ad['price'],
+                'description': ad['description'],
+                'photos': ad['photos'],
+                'inspection_photos': ad['inspection_photos'],
+                'thickness_photos': ad['thickness_photos'],
+                'added_date': datetime.utcnow(),
+            }
+
+        if sample_ads:
+            logger.info("Добавлено %s тестовых объявления(ий) для демонстрации", len(sample_ads))
 
     async def get_ads(self):
         return [dict(ad) for ad in sorted(self.ads.values(), key=lambda x: x['added_date'], reverse=True)]
