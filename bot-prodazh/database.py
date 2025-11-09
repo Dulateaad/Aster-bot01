@@ -1,3 +1,5 @@
+# database.py
+
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -36,12 +38,14 @@ class Database:
                 'phone': None,
                 'city': None,
                 'cheque_file_id': None,
+                'created_at': datetime.utcnow(),
                 'last_active': datetime.utcnow(),
             }
         else:
             user.update({
                 'username': username,
                 'status': status,
+                'created_at': user.get('created_at') or datetime.utcnow(),
                 'last_active': user.get('last_active') or datetime.utcnow(),
             })
         self.users[user_id] = user
@@ -60,6 +64,7 @@ class Database:
             'phone': None,
             'city': None,
             'cheque_file_id': None,
+            'created_at': datetime.utcnow(),
             'last_active': datetime.utcnow(),
         })
         user.update({'name': name, 'phone': phone, 'city': city})
@@ -74,6 +79,7 @@ class Database:
             'phone': None,
             'city': None,
             'cheque_file_id': None,
+            'created_at': datetime.utcnow(),
             'last_active': datetime.utcnow(),
         })
         user['status'] = status
@@ -88,6 +94,7 @@ class Database:
             'phone': None,
             'city': None,
             'cheque_file_id': None,
+            'created_at': datetime.utcnow(),
             'last_active': datetime.utcnow(),
         })
         user['last_active'] = datetime.utcnow()
@@ -308,3 +315,11 @@ class Database:
 
     async def get_new_ads_count(self, cutoff_time):
         return sum(1 for ad in self.ads.values() if ad['added_date'] >= cutoff_time)
+
+    async def get_users_registered_before(self, cutoff_time):
+        result = []
+        for user_id, user in self.users.items():
+            created_at = user.get('created_at')
+            if created_at and created_at <= cutoff_time:
+                result.append({'user_id': user_id, **user})
+        return result
