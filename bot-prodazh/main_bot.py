@@ -86,12 +86,14 @@ class RaiseRequestState(StatesGroup):
 class LastActiveMiddleware(BaseMiddleware):
     async def on_pre_process_message(self, message: types.Message, data: dict):
         try:
+            await db.update_username(message.from_user.id, message.from_user.username)
             await db.update_last_active(message.from_user.id)
         except Exception as e:
             logger.error(f"Ошибка при обновлении last_active для пользователя {message.from_user.id}: {e}")
 
     async def on_pre_process_callback_query(self, callback_query: types.CallbackQuery, data: dict):
         try:
+            await db.update_username(callback_query.from_user.id, callback_query.from_user.username)
             await db.update_last_active(callback_query.from_user.id)
         except Exception as e:
             logger.error(f"Ошибка при обновлении last_active для пользователя {callback_query.from_user.id}: {e}")
