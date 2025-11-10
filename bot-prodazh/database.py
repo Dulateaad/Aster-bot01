@@ -345,7 +345,3 @@ class Database:
             if created_at and created_at <= cutoff_time:
                 result.append({'user_id': user_id, **user})
         return result
-            if created_at and created_at <= cutoff_time:
-                result.append({'user_id': user_id, **user})
-        return result
-
