@@ -1674,7 +1674,8 @@ async def handle_offer_price(message: types.Message, state: FSMContext):
         await state.finish()
         return
 
-    await notify_managers_price_offer(message.from_user.id, ad, offered_price)
+    await db.add_price_offer(ad['ad_id'], message.from_user.id, offered_price, 'offer')
+    await notify_managers_price_offer(message.from_user.id, ad, offered_price, message.from_user.username)
     await message.answer("Ваше предложение отправлено менеджеру. Спасибо!", reply_markup=main_menu_keyboard())
     await state.finish()
 
@@ -1745,25 +1746,38 @@ async def handle_raise_price(message: types.Message, state: FSMContext):
 
     await state.finish()
 
-async def notify_managers_price_offer(user_id: int, ad, offered_price: int):
+async def notify_managers_price_offer(user_id: int, ad, offered_price: int, fallback_username: str | None = None):
     user_contact = await db.get_user(user_id)
     if user_contact:
         name = user_contact.get('name') or "Не указано"
         phone = user_contact.get('phone') or "Не указано"
         city = user_contact.get('city') or "Не указано"
+        username = user_contact.get('username') or fallback_username or "unknown"
     else:
         name = phone = city = "Не указано"
+        username = fallback_username or "unknown"
 
     text = (
-        f"Пользователь *@{user_contact.get('username') if user_contact else 'unknown'}* предложил цену\n"
+        f"Пользователь *@{username}* предложил цену\n"
         f"Автомобиль: {ad['title']}\n"
         f"Предложение: {offered_price} KZT\n"
         f"Имя: {name}\nТелефон: {phone}\nГород: {city}"
     )
     recipients = set(MANAGER_IDS + ADMIN_IDS)
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(
+        types.InlineKeyboardButton(
+            "Принять",
+            callback_data=f"price_accept_offer_{ad['ad_id']}_{user_id}_{offered_price}",
+        ),
+        types.InlineKeyboardButton(
+            "Отклонить",
+            callback_data=f"price_decline_offer_{ad['ad_id']}_{user_id}_{offered_price}",
+        ),
+    )
     for recipient in recipients:
         try:
-            await bot.send_message(recipient, text, parse_mode='Markdown')
+            await bot.send_message(recipient, text, reply_markup=keyboard, parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Не удалось отправить уведомление о предложении цены пользователю {recipient}: {e}")
 
@@ -1859,7 +1873,8 @@ async def handle_raise_request(message: types.Message, state: FSMContext):
         )
         return
 
-    await notify_managers_price_raise_request(message.from_user.id, ad, requested_price)
+    await db.add_price_offer(ad['ad_id'], message.from_user.id, requested_price, 'raise')
+    await notify_managers_price_raise_request(message.from_user.id, ad, requested_price, message.from_user.username)
     await message.answer("Ваше предложение отправлено менеджеру. Спасибо!", reply_markup=main_menu_keyboard())
     await state.finish()
 
@@ -1903,27 +1918,105 @@ async def process_auction_mode(callback_query: types.CallbackQuery, state: FSMCo
     except MessageNotModified:
         pass
 
-async def notify_managers_price_raise_request(user_id: int, ad, requested_price: int):
+async def notify_managers_price_raise_request(user_id: int, ad, requested_price: int, fallback_username: str | None = None):
     user_contact = await db.get_user(user_id)
     if user_contact:
         name = user_contact.get('name') or "Не указано"
         phone = user_contact.get('phone') or "Не указано"
         city = user_contact.get('city') or "Не указано"
+        username = user_contact.get('username') or fallback_username or "unknown"
     else:
         name = phone = city = "Не указано"
+        username = fallback_username or "unknown"
 
     text = (
-        f"Пользователь *@{user_contact.get('username') if user_contact else 'unknown'}* предлагает поднять цену\n"
+        f"Пользователь *@{username}* предлагает поднять цену\n"
         f"Автомобиль: {ad['title']}\n"
         f"Новая цена: {requested_price} KZT\n"
         f"Имя: {name}\nТелефон: {phone}\nГород: {city}"
     )
     recipients = set(MANAGER_IDS + ADMIN_IDS)
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(
+        types.InlineKeyboardButton(
+            "Принять",
+            callback_data=f"price_accept_raise_{ad['ad_id']}_{user_id}_{requested_price}",
+        ),
+        types.InlineKeyboardButton(
+            "Отклонить",
+            callback_data=f"price_decline_raise_{ad['ad_id']}_{user_id}_{requested_price}",
+        ),
+    )
     for recipient in recipients:
         try:
-            await bot.send_message(recipient, text, parse_mode='Markdown')
+            await bot.send_message(recipient, text, reply_markup=keyboard, parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Не удалось отправить уведомление о повышении цены пользователю {recipient}: {e}")
+
+@dp.callback_query_handler(lambda c: c.data and (c.data.startswith('price_accept_') or c.data.startswith('price_decline_')))
+async def process_price_offer_decision(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id not in ADMIN_IDS and callback_query.from_user.id not in MANAGER_IDS:
+        await callback_query.answer("Недостаточно прав", show_alert=True)
+        return
+
+    parts = callback_query.data.split('_')
+    if len(parts) < 6:
+        await callback_query.answer("Некорректные данные", show_alert=True)
+        return
+
+    action = parts[1]
+    kind = parts[2]
+    try:
+        ad_id = int(parts[3])
+        user_id = int(parts[4])
+        price = int(parts[5])
+    except (ValueError, IndexError):
+        await callback_query.answer("Некорректные данные", show_alert=True)
+        return
+
+    # Проверяем наличие предложения
+    offer = await db.consume_price_offer(ad_id, user_id, price, kind)
+    if not offer:
+        await callback_query.answer("Предложение уже обработано", show_alert=True)
+        return
+
+    try:
+        ad = await db.get_ad(ad_id)
+    except Exception as e:
+        logger.error(f"Ошибка при получении объявления {ad_id}: {e}")
+        await callback_query.answer("Произошла ошибка", show_alert=True)
+        return
+
+    if not ad:
+        await callback_query.answer("Объявление не найдено", show_alert=True)
+        return
+
+    if action == 'decline':
+        await callback_query.answer("Предложение отклонено")
+        try:
+            await bot.send_message(user_id, f"Ваше предложение по цене для '{ad['title']}' отклонено администратором.")
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление пользователю {user_id} об отклонении: {e}")
+        return
+
+    # Для принятого предложения обновляем цену
+    old_price = ad['price']
+    new_price = price
+    try:
+        await db.update_ad(ad_id, price=new_price)
+    except ValueError as exc:
+        await callback_query.answer(str(exc), show_alert=True)
+        return
+
+    await callback_query.answer("Цена обновлена")
+    try:
+        await bot.send_message(user_id, f"Ваше предложение по цене для '{ad['title']}' принято. Новая цена: {new_price} KZT.")
+    except Exception as e:
+        logger.error(f"Не удалось уведомить пользователя {user_id} о принятии предложения: {e}")
+
+    # Уведомляем всех о смене цены
+    updated_ad = await db.get_ad(ad_id)
+    await notify_price_change(updated_ad, old_price, new_price, callback_query.from_user.id)
 
 # Run the bot
 if __name__ == '__main__':
