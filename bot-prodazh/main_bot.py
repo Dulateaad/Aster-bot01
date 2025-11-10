@@ -15,7 +15,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pytz import utc
 from config import MAIN_BOT_TOKEN, ADMIN_IDS, MANAGER_IDS
 from database import Database
-from aiogram.utils.exceptions import Throttled
+from aiogram.utils.exceptions import Throttled, MessageNotModified
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1898,7 +1898,32 @@ async def process_auction_mode(callback_query: types.CallbackQuery, state: FSMCo
 
     labels = {'up': 'повышение (+100K)', 'down': 'понижение (−100K)', 'off': 'выключен'}
     await callback_query.answer(f"Аукцион: {labels[mode_map[mode_key]]}")
-    await show_ad_with_navigation(callback_query, state, edit=True)
+    try:
+        await show_ad_with_navigation(callback_query, state, edit=True)
+    except MessageNotModified:
+        pass
+
+async def notify_managers_price_raise_request(user_id: int, ad, requested_price: int):
+    user_contact = await db.get_user(user_id)
+    if user_contact:
+        name = user_contact.get('name') or "Не указано"
+        phone = user_contact.get('phone') or "Не указано"
+        city = user_contact.get('city') or "Не указано"
+    else:
+        name = phone = city = "Не указано"
+
+    text = (
+        f"Пользователь *@{user_contact.get('username') if user_contact else 'unknown'}* предлагает поднять цену\n"
+        f"Автомобиль: {ad['title']}\n"
+        f"Новая цена: {requested_price} KZT\n"
+        f"Имя: {name}\nТелефон: {phone}\nГород: {city}"
+    )
+    recipients = set(MANAGER_IDS + ADMIN_IDS)
+    for recipient in recipients:
+        try:
+            await bot.send_message(recipient, text, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление о повышении цены пользователю {recipient}: {e}")
 
 # Run the bot
 if __name__ == '__main__':
