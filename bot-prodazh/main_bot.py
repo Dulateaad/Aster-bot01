@@ -493,7 +493,13 @@ async def show_ad_with_navigation(message_or_callback, state: FSMContext, edit=F
     model = ad['model']
     year = ad['year']
     added_date = ad['added_date']
-    caption = f"{title}\nМодель: {model}\nГод выпуска: {year}\nЦена: {price} KZT"
+    auction_mode = ad.get('auction_mode', 'off')
+    mode_label = {
+        'off': '—',
+        'up': 'повышение (+100K)',
+        'down': 'понижение (−100K)',
+    }.get(auction_mode, '—')
+    caption = f"{title}\nМодель: {model}\nГод выпуска: {year}\nЦена: {price} KZT\nАукцион: {mode_label}"
 
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
@@ -533,6 +539,14 @@ async def show_ad_with_navigation(message_or_callback, state: FSMContext, edit=F
         navigation_buttons.append(types.InlineKeyboardButton("Следующее »", callback_data="next_ad"))
     if navigation_buttons:
         keyboard.row(*navigation_buttons)
+
+    requester_id = message_or_callback.from_user.id
+    if requester_id in ADMIN_IDS:
+        keyboard.add(
+            types.InlineKeyboardButton("Старт ↑", callback_data=f"auction_up_{ad_id}"),
+            types.InlineKeyboardButton("Старт ↓", callback_data=f"auction_down_{ad_id}"),
+        )
+        keyboard.add(types.InlineKeyboardButton("Стоп аукциона", callback_data=f"auction_off_{ad_id}"))
 
     if photos:
         file_id = photos[0]  # Показываем только первое фото
@@ -1332,7 +1346,13 @@ async def process_callback_ad(callback_query: types.CallbackQuery, state: FSMCon
     model = ad['model']
     year = ad['year']
     added_date = ad['added_date']
-    caption = f"{title}\nМодель: {model}\nГод выпуска: {year}\nЦена: {price} KZT"
+    auction_mode = ad.get('auction_mode', 'off')
+    mode_label = {
+        'off': '—',
+        'up': 'повышение (+100K)',
+        'down': 'понижение (−100K)',
+    }.get(auction_mode, '—')
+    caption = f"{title}\nМодель: {model}\nГод выпуска: {year}\nЦена: {price} KZT\nАукцион: {mode_label}"
 
     if action == 'description':
         if description:
@@ -1396,9 +1416,47 @@ async def process_callback_ad(callback_query: types.CallbackQuery, state: FSMCon
     elif action == 'raise':
         await callback_query.answer()
         if callback_query.from_user.id in ADMIN_IDS:
-            await state.update_data(raise_ad_id=ad_id)
-            await PriceRaiseState.waiting_for_price.set()
-            await bot.send_message(callback_query.from_user.id, f"Текущая цена: {ad['price']} KZT. Введите новую цену:", reply_markup=cancel_keyboard())
+            step = 100_000
+            mode = ad.get('auction_mode', 'up')
+            if mode == 'down':
+                new_price = ad['price'] - step
+                if new_price <= 0:
+                    new_price = max(ad['price'] - step, 0)
+                direction_text = "уменьшена"
+            else:
+                new_price = ad['price'] + step
+                direction_text = "увеличена"
+
+            if new_price < 0:
+                await bot.send_message(callback_query.from_user.id, "Цена не может быть меньше 0.")
+                return
+
+            old_price = ad['price']
+            if new_price == old_price:
+                await bot.send_message(callback_query.from_user.id, "Цена не изменилась.")
+                return
+
+            try:
+                await db.update_ad(ad_id, price=new_price)
+            except ValueError as exc:
+                await bot.send_message(callback_query.from_user.id, str(exc))
+                return
+
+            # Обновляем данные в состоянии (список объявлений)
+            data = await state.get_data()
+            ads = data.get('ads')
+            if ads:
+                for entry in ads:
+                    if entry['ad_id'] == ad_id:
+                        entry['price'] = new_price
+                await state.update_data(ads=ads)
+
+            await bot.send_message(callback_query.from_user.id, f"Цена {direction_text} до {new_price} KZT.")
+
+            updated_ad = await db.get_ad(ad_id)
+            await notify_price_change(updated_ad, old_price, new_price, callback_query.from_user.id)
+
+            await show_ad_with_navigation(callback_query, state, edit=True)
         else:
             await state.update_data(raise_request_ad_id=ad_id)
             await RaiseRequestState.waiting_for_price.set()
@@ -1710,19 +1768,45 @@ async def notify_managers_price_offer(user_id: int, ad, offered_price: int):
             logger.error(f"Не удалось отправить уведомление о предложении цены пользователю {recipient}: {e}")
 
 async def notify_price_change(ad, old_price: int, new_price: int, initiator_id: int):
-    text = (
-        f"Цена обновлена для объявления '{ad['title']}'.\n"
+    diff = new_price - old_price
+    if diff == 0:
+        return
+
+    direction = "увеличена" if diff > 0 else "уменьшена"
+    diff_abs = abs(diff)
+
+    text_admin = (
+        f"Цена {direction} на {diff_abs} KZT для объявления '{ad['title']}'.\n"
         f"Было: {old_price} KZT\n"
         f"Стало: {new_price} KZT"
     )
-    recipients = set(MANAGER_IDS + ADMIN_IDS)
-    for recipient in recipients:
+    recipients_admin = set(MANAGER_IDS + ADMIN_IDS)
+    for recipient in recipients_admin:
         if recipient == initiator_id:
             continue
         try:
-            await bot.send_message(recipient, text)
+            await bot.send_message(recipient, text_admin)
         except Exception as e:
             logger.error(f"Не удалось отправить уведомление об изменении цены пользователю {recipient}: {e}")
+
+    try:
+        approved_users = await db.get_approved_users()
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка пользователей для уведомления: {e}")
+        approved_users = []
+
+    text_users = (
+        f"Цена {direction} на {diff_abs} KZT для автомобиля '{ad['title']}'.\n"
+        f"Новая цена: {new_price} KZT"
+    )
+
+    for user_id in approved_users:
+        if user_id in recipients_admin:
+            continue
+        try:
+            await bot.send_message(user_id, text_users)
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
 
 @dp.message_handler(lambda message: message.text == "Закрыть панель")
 async def close_admin_panel(message: types.Message):
@@ -1778,6 +1862,43 @@ async def handle_raise_request(message: types.Message, state: FSMContext):
     await notify_managers_price_raise_request(message.from_user.id, ad, requested_price)
     await message.answer("Ваше предложение отправлено менеджеру. Спасибо!", reply_markup=main_menu_keyboard())
     await state.finish()
+
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('auction_'))
+async def process_auction_mode(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.from_user.id not in ADMIN_IDS:
+        await callback_query.answer("У вас нет прав", show_alert=True)
+        return
+
+    parts = callback_query.data.split('_')
+    if len(parts) < 3:
+        await callback_query.answer("Некорректный запрос", show_alert=True)
+        return
+
+    mode_key = parts[1]
+    ad_id = int(parts[2])
+    mode_map = {'up': 'up', 'down': 'down', 'off': 'off'}
+    if mode_key not in mode_map:
+        await callback_query.answer("Неизвестный режим", show_alert=True)
+        return
+
+    try:
+        await db.set_auction_mode(ad_id, mode_map[mode_key])
+    except ValueError as exc:
+        await callback_query.answer(str(exc), show_alert=True)
+        return
+
+    # обновляем данные в состоянии
+    data = await state.get_data()
+    ads = data.get('ads')
+    if ads:
+        for entry in ads:
+            if entry['ad_id'] == ad_id:
+                entry['auction_mode'] = mode_map[mode_key]
+        await state.update_data(ads=ads)
+
+    labels = {'up': 'повышение (+100K)', 'down': 'понижение (−100K)', 'off': 'выключен'}
+    await callback_query.answer(f"Аукцион: {labels[mode_map[mode_key]]}")
+    await show_ad_with_navigation(callback_query, state, edit=True)
 
 # Run the bot
 if __name__ == '__main__':
