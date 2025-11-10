@@ -120,6 +120,7 @@ class Database:
             'inspection_photos': list(inspection_photos or []),
             'thickness_photos': list(thickness_photos or []),
             'added_date': datetime.utcnow(),
+            'auction_mode': 'off',
         }
         self.ads[ad_id] = ad
         logger.info("Объявление '%s' добавлено с ID %s", title, ad_id)
@@ -190,6 +191,7 @@ class Database:
                 'inspection_photos': ad['inspection_photos'],
                 'thickness_photos': ad['thickness_photos'],
                 'added_date': datetime.utcnow(),
+                'auction_mode': 'off',
             }
 
         if sample_ads:
@@ -224,6 +226,15 @@ class Database:
             if key in allowed_fields:
                 ad[key] = value
         logger.info("Обновлено объявление %s: %s", ad_id, fields)
+
+    async def set_auction_mode(self, ad_id: int, mode: str):
+        ad = self.ads.get(ad_id)
+        if not ad:
+            raise ValueError(f"Объявление с ID {ad_id} не найдено")
+        if mode not in {'off', 'up', 'down'}:
+            raise ValueError(f"Недопустимый режим аукциона: {mode}")
+        ad['auction_mode'] = mode
+        logger.info("Режим аукциона объявления %s установлен в '%s'", ad_id, mode)
 
     async def get_ads(self):
         return [dict(ad) for ad in sorted(self.ads.values(), key=lambda x: x['added_date'], reverse=True)]
@@ -334,3 +345,7 @@ class Database:
             if created_at and created_at <= cutoff_time:
                 result.append({'user_id': user_id, **user})
         return result
+            if created_at and created_at <= cutoff_time:
+                result.append({'user_id': user_id, **user})
+        return result
+
